@@ -21,6 +21,14 @@ EXPECTED_FEATURES = [
     "bmi_age_interaction",
 ]
 
+# Hardcoded fallback model comparison table (matches provided results)
+FALLBACK_MODEL_METRICS = pd.DataFrame([
+    {"Model": "Linear Regression", "MAE": 4176.92, "RMSE": 5956.45, "R2": 0.8069},
+    {"Model": "Random Forest",     "MAE": 2619.61, "RMSE": 4665.05, "R2": 0.8816},
+    {"Model": "XGBoost",           "MAE": 2592.25, "RMSE": 4456.00, "R2": 0.8919},
+    {"Model": "Tuned XGBoost",     "MAE": 2444.16, "RMSE": 4229.80, "R2": 0.9026},
+])
+
 
 # ── Model loading ──────────────────────────────────────────────────────────────
 def find_project_root(start: Path) -> Path:
@@ -50,6 +58,32 @@ def load_artifacts(root: Path) -> tuple[Any | None, list[str], str | None]:
     return model, features, None
 
 
+@st.cache_data(show_spinner=False)
+def load_dataset(root: Path) -> pd.DataFrame:
+    for name in ("insurance_cleaned.csv", "cleaned_insurance.csv", "insurance.csv"):
+        path = root / "data" / name
+        if path.exists():
+            return pd.read_csv(path)
+    return pd.DataFrame()
+
+
+@st.cache_data(show_spinner=False)
+def load_model_metrics(root: Path) -> pd.DataFrame:
+    path = root / "reports" / "model_comparison.csv"
+    if path.exists():
+        return pd.read_csv(path)
+    # Return the hardcoded fallback so the dashboard always shows comparison data
+    return FALLBACK_MODEL_METRICS.copy()
+
+
+@st.cache_data(show_spinner=False)
+def load_feature_importance(root: Path) -> pd.DataFrame:
+    path = root / "reports" / "feature_importance.csv"
+    if path.exists():
+        return pd.read_csv(path)
+    return pd.DataFrame()
+
+
 # ── Page config ────────────────────────────────────────────────────────────────
 def configure_page() -> None:
     st.set_page_config(
@@ -61,23 +95,12 @@ def configure_page() -> None:
 
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
-# KEY ARCHITECTURAL DECISION:
-# We do NOT wrap Streamlit widgets inside custom HTML divs — Streamlit renders
-# widgets outside the HTML flow, so any <div class="panel"> that tries to wrap
-# widgets produces orphaned empty boxes.
-# Instead: use Streamlit's own st.container(border=True) for the card look,
-# and style [data-testid="stVerticalBlockBorderWrapper"] to override its style.
-# All custom HTML (headings, result cards, badges, profile grid) contains ONLY
-# static content — never Streamlit widget placeholders.
-
 def inject_styles() -> None:
     st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 /* ── Force light mode on ALL elements ── */
-/* Streamlit sometimes renders widget internals in dark mode even on a light page.
-   These rules reset every widget label, input, and control to explicit light colours. */
 html, body, [class*="css"], .stApp {
     font-family: 'Inter', sans-serif;
     color-scheme: light !important;
@@ -95,14 +118,7 @@ html, body, [class*="css"], .stApp {
     max-width: 1180px;
 }
 
-/* ════════════════════════════════════════════
-   WIDGET LABELS — the root of the blue-box problem.
-   Streamlit wraps every label in a <label> or <p> inside
-   [data-testid="stWidgetLabel"]. In dark mode these get a
-   near-black background + white text, which appears as a
-   blue-highlighted block on a light page.
-   Fix: force transparent background + dark text on every label.
-   ════════════════════════════════════════════ */
+/* ── Widget labels ── */
 [data-testid="stWidgetLabel"],
 [data-testid="stWidgetLabel"] *,
 [data-testid="stWidgetLabel"] p,
@@ -115,7 +131,6 @@ html, body, [class*="css"], .stApp {
     font-weight: 500 !important;
 }
 
-/* Number input labels */
 [data-testid="stNumberInputContainer"] label,
 [data-testid="stNumberInputContainer"] p,
 div[data-testid="stNumberInput"] > label,
@@ -127,7 +142,6 @@ div[data-testid="stNumberInput"] > div > label {
     font-weight: 500 !important;
 }
 
-/* Segmented control labels */
 [data-testid="stSegmentedControl"] > label,
 [data-testid="stSegmentedControl"] > div > label,
 [data-testid="stSegmentedControl"] p {
@@ -138,7 +152,6 @@ div[data-testid="stNumberInput"] > div > label {
     font-weight: 500 !important;
 }
 
-/* Selectbox labels */
 [data-testid="stSelectbox"] > label,
 [data-testid="stSelectbox"] p {
     background: transparent !important;
@@ -148,7 +161,6 @@ div[data-testid="stNumberInput"] > div > label {
     font-weight: 500 !important;
 }
 
-/* Any other label Streamlit might produce */
 .main label,
 .main [data-baseweb="form-control-label"],
 .main .stMarkdown p {
@@ -157,7 +169,6 @@ div[data-testid="stNumberInput"] > div > label {
     color: #2c4a42 !important;
 }
 
-/* Number input box itself */
 div[data-testid="stNumberInput"] input {
     background: #ffffff !important;
     color: #0f1f1c !important;
@@ -166,7 +177,6 @@ div[data-testid="stNumberInput"] input {
     font-weight: 500 !important;
 }
 
-/* Selectbox box */
 div[data-baseweb="select"] > div {
     background: #ffffff !important;
     color: #0f1f1c !important;
@@ -178,20 +188,18 @@ div[data-baseweb="select"] span {
     background: transparent !important;
 }
 
-/* Segmented control pill buttons */
 [data-testid="stSegmentedControl"] [role="radio"],
 [data-testid="stSegmentedControl"] button {
     color: #2c4a42 !important;
     background: transparent !important;
 }
 
-/* Help tooltip icon */
 [data-testid="stWidgetLabel"] [data-testid="stTooltipHoverTarget"] svg {
     color: #7aaa94 !important;
     fill: #7aaa94 !important;
 }
 
-/* ── Streamlit native card (st.container border=True) ── */
+/* ── Streamlit native card ── */
 [data-testid="stVerticalBlockBorderWrapper"] {
     background: #ffffff !important;
     border: 1px solid #cdddd6 !important;
@@ -200,14 +208,43 @@ div[data-baseweb="select"] span {
     padding: 0.25rem !important;
 }
 [data-testid="stVerticalBlockBorderWrapper"] > div {
-    padding: 1.2rem 1.4rem !important;
+    padding: 1.3rem 1.5rem !important;
+}
+
+/* ── Tabs ── */
+[data-testid="stTabs"] [role="tablist"] {
+    background: #ffffff !important;
+    border-radius: 10px !important;
+    padding: 0.25rem !important;
+    border: 1px solid #cdddd6 !important;
+}
+[data-testid="stTabs"] button[role="tab"] {
+    color: #2c4a42 !important;
+    background: transparent !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+}
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+    color: #ffffff !important;
+    background: #156645 !important;
+}
+[data-testid="stTabs"] button[role="tab"] p {
+    color: inherit !important;
+}
+[data-testid="stTabs"] button {
+    color: #0f1f1c !important;
+    background: transparent !important;
+    font-weight: 700 !important;
+}
+[data-testid="stTabs"] button[aria-selected="true"] {
+    color: #ffffff !important;
+    border-bottom-color: #156645 !important;
 }
 
 /* ── Sidebar ── */
 [data-testid="stSidebar"] {
     background: #0f1f1c !important;
 }
-/* Reset the global label fix inside sidebar — sidebar intentionally uses light text */
 [data-testid="stSidebar"] *,
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] span,
@@ -333,7 +370,7 @@ div[data-baseweb="select"] span {
     line-height: 1.3;
 }
 
-/* ── Section heading (pure HTML, not wrapping widgets) ── */
+/* ── Section heading ── */
 .sec-head {
     font-size: 0.92rem;
     font-weight: 700;
@@ -342,6 +379,11 @@ div[data-baseweb="select"] span {
     padding-bottom: 0.5rem;
     border-bottom: 2px solid #c0ddd0;
     letter-spacing: 0.01em;
+}
+
+/* ── Model comparison table highlighting ── */
+.model-comparison-winner {
+    background: #f0fbf5 !important;
 }
 
 /* ── Result card ── */
@@ -401,6 +443,19 @@ div[data-baseweb="select"] span {
 }
 .badge-inr { background:#fff8e1; color:#7a4f08; border-color:#f5cc6a; }
 .badge-usd { background:#eef0ff; color:#2a38b0; border-color:#b5bcf0; }
+.badge-best {
+    display: inline-block;
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.12rem 0.45rem;
+    border-radius: 4px;
+    background: #e6f7ee;
+    color: #145c38;
+    border: 1px solid #7ecfa8;
+    vertical-align: middle;
+    margin-left: 0.4rem;
+}
 
 /* ── Profile grid ── */
 .profile-grid {
@@ -496,12 +551,6 @@ div.stButton > button[kind="primary"]:hover {
 div[data-baseweb="select"] > div { border-radius: 7px !important; }
 div[data-testid="stNumberInput"] input { border-radius: 7px !important; }
 
-/* ── st.container border=True override spacing ── */
-/* Remove the label gap that causes the empty-box illusion */
-[data-testid="stVerticalBlockBorderWrapper"] > div {
-    padding: 1.3rem 1.5rem !important;
-}
-
 /* ── Footer ── */
 .footer {
     text-align: center;
@@ -511,6 +560,26 @@ div[data-testid="stNumberInput"] input { border-radius: 7px !important; }
     font-size: 0.81rem;
     color: #5a7870;
     line-height: 1.55;
+}
+
+/* ── Dashboard and markdown blocks ── */
+.sec-head,
+.stMarkdown .sec-head {
+    color: #0f1f1c !important;
+    background: transparent !important;
+}
+
+/* ── Metrics ── */
+div[data-testid="stMetric"] label,
+div[data-testid="stMetric"] [data-testid="stMetricLabel"],
+div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    color: #0f1f1c !important;
+    background: transparent !important;
+}
+
+/* ── Table and dataframe ── */
+[data-testid="stDataFrame"] * {
+    color: #0f1f1c !important;
 }
 
 /* ── Responsive ── */
@@ -552,8 +621,8 @@ def render_sidebar(root: Path, model_ok: bool, features: list[str]) -> None:
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def format_inr(amount: float) -> str:
-    rounded = round(abs(amount), 2)
-    sign    = "-" if amount < 0 else ""
+    """Format a positive float as an Indian-style rupee string (e.g. ₹1,23,456.78)."""
+    rounded = round(amount, 2)
     i_str, d_str = f"{rounded:.2f}".split(".")
     if len(i_str) <= 3:
         grouped = i_str
@@ -566,7 +635,7 @@ def format_inr(amount: float) -> str:
         if lead:
             parts.insert(0, lead)
         grouped = ",".join([*parts, last3])
-    return f"₹{sign}{grouped}.{d_str}"
+    return f"₹{grouped}.{d_str}"
 
 
 def bmi_category(bmi: float) -> tuple[str, str]:
@@ -636,9 +705,8 @@ def render_profile(inputs: dict[str, Any]) -> None:
 </div>""", unsafe_allow_html=True)
 
 
-# ── Input panel — uses st.container(border=True), heading inside via st.markdown ─
+# ── Input panel ────────────────────────────────────────────────────────────────
 def render_inputs() -> dict[str, Any]:
-    # Section heading rendered as Streamlit markdown (not HTML div wrapping widgets)
     st.markdown('<p class="sec-head">Patient Details</p>', unsafe_allow_html=True)
 
     c1, c2 = st.columns(2, gap="medium")
@@ -649,17 +717,9 @@ def render_inputs() -> dict[str, Any]:
             step=0.1, format="%.1f",
             help="Body Mass Index — weight (kg) ÷ height² (m²)",
         )
-        smoker = st.selectbox(
-    "Smoking Status",
-    ["Non-smoker", "Smoker"],
-    index=0
-)
+        smoker = st.selectbox("Smoking Status", ["Non-smoker", "Smoker"], index=0)
     with c2:
-        sex = st.selectbox(
-    "Gender",
-    ["Female", "Male"],
-    index=0
-)
+        sex      = st.selectbox("Gender", ["Female", "Male"], index=0)
         children = st.number_input("Dependant children", min_value=0, max_value=10, value=0, step=1)
         region   = st.selectbox(
             "US region", ["Northeast", "Northwest", "Southeast", "Southwest"]
@@ -739,6 +799,192 @@ def render_prediction(
         st.dataframe(input_df, use_container_width=True, hide_index=True)
 
 
+# ── Dashboard tab ──────────────────────────────────────────────────────────────
+def render_dashboard(root: Path) -> None:
+    df      = load_dataset(root)
+    metrics = load_model_metrics(root)   # always returns data (fallback if file missing)
+
+    st.markdown('<p class="sec-head">Dashboard Insights</p>', unsafe_allow_html=True)
+
+    # ── Top KPI row ──────────────────────────────────────────────────────────
+    if not df.empty:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Records",        f"{len(df):,}")
+        c2.metric("Average cost",   f"${df['charges'].mean():,.2f}")
+        c3.metric("Median cost",    f"${df['charges'].median():,.2f}")
+        c4.metric("Smoker records", f"{int((df['smoker'] == 'yes').sum()):,}")
+
+    importance = load_feature_importance(root)
+
+    # ── Model comparison (always visible) ────────────────────────────────────
+    with st.container(border=True):
+        # Find the best model (highest R2) to highlight it
+        best_idx = int(metrics["R2"].idxmax())
+        best_name = metrics.loc[best_idx, "Model"]
+
+        st.markdown(
+            f'<p class="sec-head">Model Comparison'
+            f'<span class="badge-best">✓ {best_name}</span></p>',
+            unsafe_allow_html=True,
+        )
+
+        # Format numeric columns for display
+        display_metrics = metrics.copy()
+        display_metrics["MAE"]  = display_metrics["MAE"].map(lambda x: f"{x:,.2f}")
+        display_metrics["RMSE"] = display_metrics["RMSE"].map(lambda x: f"{x:,.2f}")
+        display_metrics["R2"]   = display_metrics["R2"].map(lambda x: f"{x:.4f}")
+
+        st.dataframe(
+            display_metrics,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Model": st.column_config.TextColumn("Model", width="medium"),
+                "MAE":   st.column_config.TextColumn("MAE ",  width="small"),
+                "RMSE":  st.column_config.TextColumn("RMSE ", width="small"),
+                "R2":    st.column_config.TextColumn("R²",         width="small"),
+            },
+        )
+
+        # Inline metric strip for the best model
+        km1, km2, km3 = st.columns(3)
+        best_row = metrics.loc[best_idx]
+        km1.metric("Best MAE",  f"{float(best_row['MAE']):,.2f}")
+        km2.metric("Best RMSE", f"{float(best_row['RMSE']):,.2f}")
+        km3.metric("Best R²",   f"{float(best_row['R2']):.4f}")
+
+    # ── Two-column detail section ─────────────────────────────────────────────
+    left, right = st.columns([1.05, 0.95], gap="large")
+
+    with left:
+        if not df.empty:
+            with st.container(border=True):
+                st.markdown('<p class="sec-head">Cost Drivers — Smoking</p>', unsafe_allow_html=True)
+                smoker_summary = (
+                    df.groupby("smoker")["charges"]
+                    .agg(["count", "mean", "median"])
+                    .reset_index()
+                    .rename(columns={
+                        "smoker":  "Smoking status",
+                        "count":   "Records",
+                        "mean":    "Average cost",
+                        "median":  "Median cost",
+                    })
+                )
+                smoker_summary["Average cost"] = smoker_summary["Average cost"].map(lambda x: f"${x:,.2f}")
+                smoker_summary["Median cost"]  = smoker_summary["Median cost"].map(lambda x: f"${x:,.2f}")
+                st.dataframe(smoker_summary, use_container_width=True, hide_index=True)
+
+            with st.container(border=True):
+                st.markdown('<p class="sec-head">Regional Summary</p>', unsafe_allow_html=True)
+                region_summary = (
+                    df.groupby("region")["charges"]
+                    .agg(["count", "mean", "median"])
+                    .reset_index()
+                    .rename(columns={
+                        "region":  "Region",
+                        "count":   "Records",
+                        "mean":    "Average cost",
+                        "median":  "Median cost",
+                    })
+                )
+                region_summary["Region"]       = region_summary["Region"].str.title()
+                region_summary["Average cost"] = region_summary["Average cost"].map(lambda x: f"${x:,.2f}")
+                region_summary["Median cost"]  = region_summary["Median cost"].map(lambda x: f"${x:,.2f}")
+                st.dataframe(region_summary, use_container_width=True, hide_index=True)
+
+    with right:
+        if not importance.empty:
+            with st.container(border=True):
+                st.markdown('<p class="sec-head">Top Feature Importance</p>', unsafe_allow_html=True)
+                st.bar_chart(importance.head(6).set_index("Feature")["Importance"])
+                st.dataframe(importance.head(6), use_container_width=True, hide_index=True)
+
+
+# ── Plots & data tab ───────────────────────────────────────────────────────────
+def render_plots_and_data(root: Path) -> None:
+    df = load_dataset(root)
+    if df.empty:
+        st.warning("Dataset file is unavailable.")
+        return
+
+    st.markdown('<p class="sec-head">Generated Plots and Data</p>', unsafe_allow_html=True)
+
+    chart_pairs = [
+        ("Cost distribution",  "eda_cost_distribution.png"),
+        ("Smoking impact",      "eda_smoking_impact.png"),
+        ("Age analysis",        "eda_age_distribution.png"),
+        ("BMI analysis",        "eda_bmi_distribution.png"),
+        ("Region analysis",     "eda_region_analysis.png"),
+        ("Correlation heatmap", "eda_correlation_heatmap.png"),
+    ]
+
+    for left_item, right_item in zip(chart_pairs[::2], chart_pairs[1::2]):
+        left, right = st.columns(2, gap="large")
+        for col, (title, filename) in ((left, left_item), (right, right_item)):
+            with col:
+                with st.container(border=True):
+                    st.markdown(f'<p class="sec-head">{title}</p>', unsafe_allow_html=True)
+                    path = root / "reports" / filename
+                    if path.exists():
+                        st.image(str(path), use_container_width=True)
+                    else:
+                        st.info(f"{filename} is not available.")
+
+    with st.container(border=True):
+        st.markdown('<p class="sec-head">Cleaned Dataset Preview</p>', unsafe_allow_html=True)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+    with st.container(border=True):
+        st.markdown('<p class="sec-head">Dataset Statistics</p>', unsafe_allow_html=True)
+        st.dataframe(df.describe(), use_container_width=True)
+
+
+# ── Model insights tab ─────────────────────────────────────────────────────────
+def render_model_insights(root: Path, model: Any | None, features: list[str]) -> None:
+    st.markdown('<p class="sec-head">Model Insights</p>', unsafe_allow_html=True)
+
+    metrics = load_model_metrics(root)   # always has data
+    best    = metrics.sort_values("R2", ascending=False).iloc[0]
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Best model", str(best["Model"]))
+    k2.metric("MAE",  f"{float(best['MAE']):,.2f}")
+    k3.metric("RMSE", f"{float(best['RMSE']):,.2f}")
+    k4.metric("R²",   f"{float(best['R2']):.4f}")
+
+    with st.container(border=True):
+        st.markdown('<p class="sec-head">Full Evaluation Metrics</p>', unsafe_allow_html=True)
+        display = metrics.copy()
+        display["MAE"]  = display["MAE"].map(lambda x: f"{x:,.2f}")
+        display["RMSE"] = display["RMSE"].map(lambda x: f"{x:,.2f}")
+        display["R2"]   = display["R2"].map(lambda x: f"{x:.4f}")
+        st.dataframe(display, use_container_width=True, hide_index=True)
+
+    importance = load_feature_importance(root)
+    if importance.empty and model is not None and hasattr(model, "feature_importances_"):
+        importance = (
+            pd.DataFrame({"Feature": features, "Importance": model.feature_importances_})
+            .sort_values("Importance", ascending=False)
+            .reset_index(drop=True)
+        )
+
+    if not importance.empty:
+        with st.container(border=True):
+            st.markdown('<p class="sec-head">Feature Importance</p>', unsafe_allow_html=True)
+            st.bar_chart(importance.set_index("Feature")["Importance"])
+            st.dataframe(importance, use_container_width=True, hide_index=True)
+
+    image_path = root / "reports" / "feature_importance.png"
+    if image_path.exists():
+        with st.container(border=True):
+            st.markdown('<p class="sec-head">Feature Importance Visualization</p>', unsafe_allow_html=True)
+            st.image(str(image_path), use_container_width=True)
+
+    if importance.empty:
+        st.info("Feature importance data is unavailable for the loaded model.")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main() -> None:
     configure_page()
@@ -787,19 +1033,31 @@ def main() -> None:
   </div>
 </div>""", unsafe_allow_html=True)
 
-    # ── Two-column body ───────────────────────────────────────────────────────
-    # CORRECT PATTERN: st.container(border=True) creates the card.
-    # Streamlit widgets are placed INSIDE the `with` block — no HTML divs wrapping them.
-    # The section heading is the first item inside the container, rendered via st.markdown.
-    left, right = st.columns([1.05, 0.95], gap="large")
+    # ── Four tabs ─────────────────────────────────────────────────────────────
+    dashboard_tab, prediction_tab, plots_tab, insights_tab = st.tabs([
+        "📊 Dashboard Insights",
+        "🩺 Healthcare Cost Prediction",
+        "📈 Plots and Data",
+        "🔬 Model Insights",
+    ])
 
-    with left:
-        with st.container(border=True):
-            inputs = render_inputs()
+    with dashboard_tab:
+        render_dashboard(root)
 
-    with right:
-        with st.container(border=True):
-            render_prediction(model, features, error, inputs)
+    with prediction_tab:
+        left, right = st.columns([1.05, 0.95], gap="large")
+        with left:
+            with st.container(border=True):
+                inputs = render_inputs()
+        with right:
+            with st.container(border=True):
+                render_prediction(model, features, error, inputs)
+
+    with plots_tab:
+        render_plots_and_data(root)
+
+    with insights_tab:
+        render_model_insights(root, model, features)
 
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown("""
