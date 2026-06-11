@@ -2,6 +2,11 @@
 
 Machine learning regression project for estimating annual healthcare insurance charges from age, BMI, smoking status, gender, dependents, and region.
 
+## GitHub Repository
+
+Project Repository:
+https://github.com/patelshivam109/Health-Cost-Estimator
+
 ## Project Contents
 
 - `app/app.py` - Streamlit application with dashboard insights, prediction, and plots/data tabs.
