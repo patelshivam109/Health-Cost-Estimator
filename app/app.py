@@ -12,7 +12,7 @@ APP_TITLE          = "Healthcare Cost Estimator"
 MODEL_FILE_NAME    = "healthcare_cost_model.pkl"
 FEATURES_FILE_NAME = "feature_names.pkl"
 USD_TO_INR         = 95.35
-RATE_DATE          = "June 10, 2026"
+RATE_DATE          = "June 11, 2026"
 
 EXPECTED_FEATURES = [
     "age", "bmi", "children",
@@ -649,11 +649,17 @@ def render_inputs() -> dict[str, Any]:
             step=0.1, format="%.1f",
             help="Body Mass Index — weight (kg) ÷ height² (m²)",
         )
-        smoker = st.segmented_control(
-            "Smoking status", ["Non-smoker", "Smoker"], default="Non-smoker"
-        )
+        smoker = st.selectbox(
+    "Smoking Status",
+    ["Non-smoker", "Smoker"],
+    index=0
+)
     with c2:
-        sex      = st.segmented_control("Biological sex", ["Female", "Male"], default="Female")
+        sex = st.selectbox(
+    "Gender",
+    ["Female", "Male"],
+    index=0
+)
         children = st.number_input("Dependant children", min_value=0, max_value=10, value=0, step=1)
         region   = st.selectbox(
             "US region", ["Northeast", "Northwest", "Southeast", "Southwest"]
