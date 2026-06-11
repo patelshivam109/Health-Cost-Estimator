@@ -582,6 +582,32 @@ div[data-testid="stMetric"] [data-testid="stMetricValue"] {
     color: #0f1f1c !important;
 }
 
+
+/* ── FIX: Force light dataframe headers & column menu ── */
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataFrame"] .gdg-header,
+[data-testid="stDataFrame"] .gdg-header-cell,
+[data-testid="stDataFrame"] .gdg-menu-icon,
+[data-testid="stDataFrame"] button,
+[data-testid="stDataFrame"] svg,
+[data-testid="stDataFrame"] [data-testid="stElementToolbar"] {
+    background: #f8fafc !important;
+    background-color: #f8fafc !important;
+    color: #0f1f1c !important;
+    fill: #0f1f1c !important;
+}
+
+[data-testid="stDataFrame"] [role="columnheader"] *,
+[data-testid="stDataFrame"] .gdg-header-cell * {
+    color: #0f1f1c !important;
+    fill: #0f1f1c !important;
+}
+
+[data-testid="stDataFrame"] canvas {
+    color-scheme: light !important;
+}
+
+
 /* ── Responsive ── */
 @media (max-width: 860px) {
     .hero h1     { font-size: 1.65rem; }
